@@ -1,15 +1,7 @@
-"""Test fixtures.
+"""Shared fixtures: stub bus / build context + HTML fixtures.
 
-Plugins should be testable WITHOUT importing arc. The fixtures here provide
-the minimum shape of `arc.plugin_api` that a unit test needs:
-
-  - StubBus: records events that the plugin/tool emits
-  - SessionContext-like, PluginBuildContext-like: plain objects with the right
-    attribute shape, no real arc dependency
-
-If you've checked out arc next to your plugin (`pip install -e ../arc`), you
-can also import the real classes from `arc.plugin_api`. These stubs let you
-test in CI without that.
+Network is mocked via `respx` (httpx test transport) in each backend/tool
+test — no live network in the suite.
 """
 from __future__ import annotations
 
@@ -20,9 +12,8 @@ from typing import Any
 import pytest
 
 
-# ── Stub bus ──────────────────────────────────────────────────────────────
-# The real arc EventBus has many concerns (dispatch, ordering, failure
-# isolation). For unit tests we only need to capture what was emitted.
+# ── Stub bus + build context ─────────────────────────────────────────────
+
 
 class StubBus:
     def __init__(self) -> None:
@@ -34,24 +25,14 @@ class StubBus:
     def types(self) -> list[str]:
         return [getattr(e, "type", "?") for e in self.emitted]
 
-
-# ── Stub context objects ──────────────────────────────────────────────────
-# Mirror the attribute shape arc passes. Frozen dataclasses keep parity with
-# the real types in arc.plugin_api.
-
-@dataclass(frozen=True)
-class StubSessionContext:
-    session_id: str = "test-session-01"
-    workspace: str = "/tmp/workspace"
-    provider_name: str = "anthropic"
-    provider_model: str = "claude-sonnet-4-6"
-    started_at: str = "2026-01-01T00:00:00Z"
+    def payloads(self, type_: str) -> list[dict]:
+        return [e.payload for e in self.emitted if getattr(e, "type", None) == type_]
 
 
 @dataclass(frozen=True)
 class StubBuildContext:
     sessions_dir: Path = field(default_factory=lambda: Path("/tmp/sessions"))
-    session_id: str = "test-session-01"
+    session_id: str = "SES_test"
     config_snapshot_yaml: str | None = None
     user_gate: Any = None
     bus: Any = None
@@ -63,10 +44,110 @@ def bus() -> StubBus:
 
 
 @pytest.fixture
-def session_ctx() -> StubSessionContext:
-    return StubSessionContext()
+def build_ctx(bus: StubBus) -> StubBuildContext:
+    return StubBuildContext(bus=bus)
+
+
+# ── HTML fixtures ────────────────────────────────────────────────────────
+
+
+EXAMPLE_HTML = """<!doctype html>
+<html><head><title>Example Domain</title></head>
+<body>
+  <h1>Example Domain</h1>
+  <p>This domain is for use in illustrative examples in documents.</p>
+  <p>More information... <a href="https://www.iana.org/domains/example">here</a></p>
+  <script>console.log("noise")</script>
+  <style>.hidden { display: none }</style>
+</body></html>
+"""
+
+
+BRAVE_RESPONSE = {
+    "web": {
+        "results": [
+            {
+                "title": "Example Result One",
+                "url": "https://one.example.com",
+                "description": "First snippet.",
+                "age": "2 days ago",
+            },
+            {
+                "title": "Example Result Two",
+                "url": "https://two.example.com",
+                "description": "Second snippet.",
+            },
+        ]
+    }
+}
+
+
+DDG_HTML_SERP = """<html><body>
+  <div class="result">
+    <a class="result__a" href="https://a.example.com">First result title</a>
+    <a class="result__snippet">First snippet body.</a>
+  </div>
+  <div class="result">
+    <a class="result__a" href="https://b.example.com">Second result title</a>
+    <a class="result__snippet">Second snippet body.</a>
+  </div>
+</body></html>
+"""
+
+
+SEARXNG_RESPONSE = {
+    "results": [
+        {
+            "title": "SearXNG Hit One",
+            "url": "https://x.example.com",
+            "content": "Content one.",
+            "publishedDate": "2026-01-01",
+        },
+        {
+            "title": "SearXNG Hit Two",
+            "url": "https://y.example.com",
+            "content": "Content two.",
+        },
+    ]
+}
+
+
+GOOGLE_PSE_RESPONSE = {
+    "items": [
+        {
+            "title": "Google Result 1",
+            "link": "https://g1.example.com",
+            "snippet": "Snippet 1",
+        },
+        {
+            "title": "Google Result 2",
+            "link": "https://g2.example.com",
+            "snippet": "Snippet 2",
+        },
+    ]
+}
 
 
 @pytest.fixture
-def build_ctx(bus: StubBus) -> StubBuildContext:
-    return StubBuildContext(bus=bus)
+def example_html() -> str:
+    return EXAMPLE_HTML
+
+
+@pytest.fixture
+def brave_response() -> dict:
+    return BRAVE_RESPONSE
+
+
+@pytest.fixture
+def ddg_html_serp() -> str:
+    return DDG_HTML_SERP
+
+
+@pytest.fixture
+def searxng_response() -> dict:
+    return SEARXNG_RESPONSE
+
+
+@pytest.fixture
+def google_pse_response() -> dict:
+    return GOOGLE_PSE_RESPONSE

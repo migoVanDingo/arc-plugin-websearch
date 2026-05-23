@@ -1,119 +1,159 @@
-# arc-plugin-template
+# arc-plugin-websearch
 
-Template repo for building **out-of-tree arc plugins**: pip-installable
-Python packages that arc auto-discovers via entry points and that contribute
-hooks and/or tools to a session.
+Four web tools for arc: search, fetch, raw HTTP, and CSS-selector
+extraction — with pluggable backends and extractors so you can swap
+implementations without forking.
 
-Use this template when you want to ship a plugin that's NOT part of arc's
-main repo — because the integration is personal (a local DB), proprietary
-(a private API), or just opinionated (a research backend you don't want to
-foist on every arc user).
+| Tool | What it does |
+|---|---|
+| `web_search`   | Search the web. Pluggable backend: Brave (default), DuckDuckGo (no API key), SearXNG (self-hosted), or Google PSE. |
+| `read_url`     | Fetch a page and return its primary text content. Pluggable extractor: trafilatura (default), raw, or bs4-text. |
+| `http_request` | Raw HTTP for APIs (GET/POST/PUT/PATCH/DELETE/HEAD). JSON-aware. |
+| `extract_html` | CSS-selector extraction from a URL or HTML string. |
 
-## What's in the box
+## Install
 
-```
-arc-plugin-template/
-├── pyproject.toml                  hatch build + arc.plugins entry point
-├── src/arc_plugin_example/
-│   ├── plugin.py                   ExamplePlugin + build() entry point
-│   └── tools/example_tool.py       One tool implementing the Tool protocol
-├── tests/
-│   ├── conftest.py                 StubBus + StubBuildContext fixtures
-│   ├── test_plugin.py              Plugin lifecycle, config, tool wiring
-│   └── test_tool.py                Tool execution, validation, events
-└── docs/PLUGIN_API.md              Pinned public-API surface
+```bash
+pip install arc-plugin-websearch
 ```
 
-The example shows the **full** plugin pattern: a plugin that owns
-session-scoped state and contributes tools bound to it. If your plugin only
-ships stateless tools, strip out `on_session_start` and build the tools
-directly in `build()`. See `docs/PLUGIN_API.md` for both shapes.
+Set the API key for your chosen backend. Brave is the recommended default:
 
-## Forking workflow
+```bash
+export BRAVE_API_KEY="..."     # https://brave.com/search/api/
+```
 
-1. **Use the template on GitHub** (or clone + push to a fresh repo).
+(DuckDuckGo needs no key. SearXNG needs your instance URL. Google PSE needs
+both a key and a search-engine ID — see Config below.)
 
-2. **Rename the package.** Pick a name like `arc-plugin-<thing>`:
+On the next `arc` launch:
 
-   ```bash
-   # Package directory
-   git mv src/arc_plugin_example src/arc_plugin_<thing>
+```
+[+] new arc plugin discovered: websearch (from arc-plugin-websearch v0.1.0)
+    enable it for this and future sessions? [Y/n] Y
+```
 
-   # In pyproject.toml: name, packages, entry-point key + path
-   #   name = "arc-plugin-<thing>"
-   #   [project.entry-points."arc.plugins"]
-   #   <thing> = "arc_plugin_<thing>.plugin:build"
-   #   [tool.hatch.build.targets.wheel]
-   #   packages = ["src/arc_plugin_<thing>"]
-   ```
+After that, the four tools appear in every session. Toggle via
+`arc plugins` whenever.
 
-   Then update imports in `plugin.py`, `tools/`, and `tests/`.
+## Config
 
-3. **Replace the example.** Gut `ExamplePlugin` and `ExampleTool` and write
-   your real plugin. Keep the structural patterns:
-   - `build(config, build_ctx) -> Plugin` is the entry-point contract
-   - `bind_bus(bus)` is optional but expected if you emit events
-   - `on_session_start` / `on_session_end` own resource lifecycle
-   - `provides_tools()` returns tools to merge into the registry
-   - Tools raise `ToolError` for failures; never return error strings
+All keys optional; reasonable defaults shipped. Lives under the plugin's
+`config:` block in `~/.arc/config.yml`.
 
-4. **Run tests:**
+```yaml
+plugins:
+  enabled:
+    - name: websearch
+      enabled: true
+      config:
+        web_search:
+          backend: brave                # 'brave'|'ddg-html'|'searxng'|'google-pse'
+          api_key_env: BRAVE_API_KEY    # backend-specific
+          base_url: null                # required for searxng (e.g. http://localhost:8888)
+          default_count: 10
+          max_count: 20
+          timeout_seconds: 15
+          backend_params: {}            # e.g. {cx: "..."} for google-pse
+        read_url:
+          extractor: trafilatura        # 'trafilatura'|'raw'|'bs4-text'
+          default_max_chars: 50000
+          timeout_seconds: 30
+          allow_schemes: [http, https]  # 'file', 'data' rejected
+        http_request:
+          default_timeout_seconds: 30
+          max_response_chars: 50000
+        extract_html:
+          timeout_seconds: 30
+          max_results: 200
+```
 
-   ```bash
-   pip install -e ".[dev]"
-   pytest
-   ```
+### Backends
 
-   With the `arc` source checked out next to your plugin, install it as
-   editable too so `from arc.plugin_api import ...` resolves:
+| Backend | Needs | Notes |
+|---|---|---|
+| `brave` (default)  | `BRAVE_API_KEY` env var | Free tier exists. Recommended. |
+| `ddg-html`         | nothing | Scrapes DDG's HTML SERP. Fragile (layout-dependent) but key-free. |
+| `searxng`          | `base_url` set to your instance | Self-hosted meta-search. Optional bearer via `api_key_env`. |
+| `google-pse`       | `GOOGLE_CSE_API_KEY` + `backend_params.cx` | Google Custom Search. `num` capped at 10/request by the API. |
 
-   ```bash
-   pip install -e ../arc/v2  # or wherever your arc checkout lives
-   ```
+Switching backends is a two-line config edit; no code change.
 
-5. **Install into arc.** Once your plugin works in isolation, point arc at
-   it:
+### Extractors
 
-   ```bash
-   # In the arc checkout (or wherever you run arc from):
-   pip install -e /path/to/arc-plugin-<thing>
-   ```
+| Extractor | Notes |
+|---|---|
+| `trafilatura` (default) | Purpose-built for article text. Falls back to `raw` if it returns empty (event records `fallback_used: true`). |
+| `raw`        | Strip tags + collapse whitespace. The fallback target above. |
+| `bs4-text`   | BeautifulSoup `get_text()` after removing script/style/noscript. |
 
-   arc's entry-point loader will discover it on next start. Enable it in
-   arc's config (`~/.arc/config.yml`):
+## Safety
 
-   ```yaml
-   plugins:
-     enabled:
-       - name: <thing>
-         enabled: true
-         config:
-           # whatever your build(config, ...) reads
-   ```
+- `read_url`: `localhost`, `127.0.0.1`, `0.0.0.0`, `::1` are hard-blocked
+  at the tool layer. Non-`http`/`https` schemes (`file://`, `data:`)
+  rejected unless explicitly allowed in `allow_schemes`.
+- `http_request`: makes whatever request you tell it to. arc's existing
+  `guard` plugin can pattern-match on the tool name + `command` field;
+  per-tool escalation on `url` / `method` is a small upstream arc change
+  documented in `_design/0001` — until then, treat `http_request` like
+  bash and pin patterns in the guard config that you'd want to escalate.
+- `http_request` events redact `Authorization`, `X-Api-Key`,
+  `X-Subscription-Token`, `Cookie`, `Proxy-Authorization` from the
+  emitted observability payload (NOT from the wire — the request still
+  sends them).
 
-## Why a plugin, not just a script?
+## Observability
 
-External plugins are the right shape when:
+Every tool call emits a structured event:
 
-- The integration owns **session-scoped state** (open DB handle, loaded
-  model, API session). Lifecycle hooks (`on_session_start` /
-  `on_session_end`) give you the right place to acquire and release it.
-- The integration **shouldn't ship with arc itself** — personal corpus,
-  paid API, proprietary data.
-- You want **graceful absence**: if the resource is missing, the plugin
-  emits a `*.disabled` event and the session continues without it. Tools
-  alone can't refuse to register themselves; plugins can.
+```
+web_search.requested      backend, query, count, freshness, country, result_count, took_ms
+web_fetch.requested       extractor, url, http_status, bytes_fetched, extracted_chars,
+                          truncated_at, fallback_used
+http_request.completed    method, url, request_headers (redacted), status, content_type, bytes
+```
 
-If you just want to add a stateless tool to arc's built-in set, consider
-upstreaming it instead.
+These land in `events.jsonl` alongside arc's standard tool envelope
+events, and render in `session.log` via arc's generic-fallback formatter.
 
-## Compatibility
+Replay is automatic: arc captures the tool input + output string. Replays
+never re-hit the network.
 
-This template targets the arc plugin API at version **0.1** (`arc.plugin_api`
-shim, entry-point discovery via `arc.plugins`, `provides_tools()`, optional
-`bind_bus(bus)` on tools). See `docs/PLUGIN_API.md` for the pinned surface
-and breakage policy.
+## Failure modes
+
+| What happens | Behavior |
+|---|---|
+| Missing API key env var | `ToolError("BRAVE_API_KEY not set ...")`; model adapts. |
+| Backend 401/403         | `ToolError("Brave search: 401 unauthorized — check BRAVE_API_KEY")`. |
+| Backend 429             | `ToolError("Brave search: rate-limited; wait and retry")`. arc's cycle detector catches loops. |
+| Network timeout         | `ToolError("network timeout after Ns")`. |
+| Empty search results    | Tool returns `"No results for: <query>"` as success — model can change query. |
+| Trafilatura returns empty | Auto-falls back to `raw`; event records `fallback_used: true`. |
+| Blocked URL scheme      | `ToolError("scheme 'file' not allowed")`. |
+| Content > `max_chars`   | Truncated at the tool with `… [+N chars truncated]`; not an error. |
+
+## Development
+
+```bash
+git clone https://github.com/.../arc-plugin-websearch
+cd arc-plugin-websearch
+pip install -e ".[dev]"
+pip install -e /path/to/arc/v2     # for `from arc.plugin_api import ...`
+pytest
+```
+
+The suite uses `respx` to mock httpx, so no live network is hit. 67 tests,
+~1s. The optional `tests/integration/` directory (not in CI by default)
+exercises real Brave + example.com calls when `BRAVE_API_KEY` is set.
+
+## Design
+
+See [`_design/0001-web-search-and-fetch.md`](_design/0001-web-search-and-fetch.md)
+for the full design: why pluggable backends, why the stateless tool-pack
+shape (vs. briefbot's session-scoped shape), the extractor fallback
+chain, and what's deferred to future phases (image/news search, prompt-
+injection scanning, response caching, robots.txt).
 
 ## License
 
-MIT — see `LICENSE`. Forks may relicense.
+MIT.
