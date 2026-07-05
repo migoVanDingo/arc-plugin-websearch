@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 from typing import Any, ClassVar
-from urllib.parse import urlparse
 
 import httpx
 
@@ -11,11 +10,6 @@ from arc.plugin_api import RuntimeEvent, ToolError, ToolInputSchema
 
 from arc_plugin_websearch import http
 from arc_plugin_websearch.extractors.base import Extractor
-
-
-_BLOCKED_HOSTS = frozenset({
-    "localhost", "127.0.0.1", "0.0.0.0", "::1",
-})
 
 
 class ReadURLTool:
@@ -65,18 +59,13 @@ class ReadURLTool:
             raise ToolError("`url` is required and must be non-empty")
         max_chars = int(input.get("max_chars", self._default_max_chars))
 
-        parsed = urlparse(url)
-        if parsed.scheme not in self._allow_schemes:
-            raise ToolError(
-                f"scheme {parsed.scheme!r} not allowed (allow: {sorted(self._allow_schemes)})"
-            )
-        if (parsed.hostname or "").lower() in _BLOCKED_HOSTS:
-            raise ToolError(f"host {parsed.hostname!r} is blocked")
-
         t0 = time.perf_counter()
         try:
-            with http.client(timeout_seconds=self._timeout, user_agent=self._user_agent) as c:
-                resp = c.get(url)
+            resp = http.safe_request(
+                "GET", url, allow_schemes=tuple(self._allow_schemes),
+                timeout_seconds=self._timeout, user_agent=self._user_agent)
+        except http.BlockedURLError as exc:
+            raise ToolError(str(exc)) from None
         except httpx.TimeoutException:
             raise ToolError(f"network timeout after {self._timeout}s") from None
         except httpx.HTTPError as exc:

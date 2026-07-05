@@ -13,7 +13,7 @@ import httpx
 
 from arc.plugin_api import ToolError
 from arc_plugin_websearch import http
-from arc_plugin_websearch.backends.base import SearchBackend, SearchQuery, SearchResult
+from arc_plugin_websearch.backends.base import SearchQuery, SearchResult
 
 
 _DEFAULT_BASE_URL = "https://api.search.brave.com/res/v1/web/search"

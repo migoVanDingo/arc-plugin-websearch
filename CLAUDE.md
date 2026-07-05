@@ -87,6 +87,26 @@ Auth-bearing headers (`Authorization`, `X-Api-Key`, `X-Subscription-Token`,
 `Cookie`, `Proxy-Authorization`) are redacted in observability payloads
 but NOT from the wire.
 
+## SSRF defense — the one seam (`http.py`)
+
+The 2026-07 audit flagged this as the highest-risk plugin; it is now hardened
+(`agent-runtime/_mitigation/06`). **Every fetch MUST go through
+`http.safe_request()`** — do not call `http.client()` directly from a tool.
+`safe_request`:
+- validates the scheme (http/https) and **resolves the host, rejecting any
+  loopback / private / link-local (`169.254.169.254`) / reserved / multicast IP**
+  (`validate_url`) — catches octal/decimal/mapped IPs + names resolving to loopback;
+- follows redirects **manually** and re-validates **every hop** (a `302 → private`
+  can't smuggle through);
+- caps the decoded body at 10 MiB (gzip-bomb defense).
+
+Tools translate `http.BlockedURLError` → `ToolError`. Search **backends**
+(brave/google/searxng) still use `http.client()` directly — deliberate: they hit
+fixed, user-configured API endpoints, not agent-controlled URLs. Residual: not
+full DNS-rebind IP-pinning (a narrow resolve→connect TOCTOU window remains). Tests:
+`tests/test_ssrf.py` + an autouse resolver stub in `conftest.py` keeps the suite
+hermetic.
+
 ## Safety knobs (in tool config)
 
 - `read_url.allow_schemes`: `[http, https]` by default; `file`, `data`

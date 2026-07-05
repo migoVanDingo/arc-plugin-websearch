@@ -71,8 +71,11 @@ class ExtractHTMLTool:
 
         if url:
             try:
-                with http.client(timeout_seconds=self._timeout, user_agent=self._user_agent) as c:
-                    resp = c.get(str(url))
+                resp = http.safe_request(
+                    "GET", str(url), timeout_seconds=self._timeout,
+                    user_agent=self._user_agent)
+            except http.BlockedURLError as exc:
+                raise ToolError(str(exc)) from None
             except httpx.TimeoutException:
                 raise ToolError(f"network timeout after {self._timeout}s") from None
             except httpx.HTTPError as exc:

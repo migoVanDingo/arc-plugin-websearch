@@ -5,11 +5,32 @@ test — no live network in the suite.
 """
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _stub_ssrf_resolver(monkeypatch):
+    """Keep the suite hermetic now that the tools SSRF-validate every fetch.
+
+    Stubs `http._resolve_ips` so validate_url runs without real DNS: literal
+    IPs (incl. private/loopback) and `localhost` resolve to themselves (so the
+    block tests still block); every other name resolves to a public IP (so the
+    respx-mocked success tests still pass without a live lookup).
+    """
+    def fake_resolve(host):
+        if host == "localhost":
+            return ["127.0.0.1"]
+        try:
+            ipaddress.ip_address(host)
+            return [host]
+        except ValueError:
+            return ["93.184.216.34"]  # public
+    monkeypatch.setattr("arc_plugin_websearch.http._resolve_ips", fake_resolve)
 
 
 # ── Stub bus + build context ─────────────────────────────────────────────

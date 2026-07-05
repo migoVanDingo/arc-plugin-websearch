@@ -94,14 +94,16 @@ class HTTPRequestTool:
                 text_body = raw_body
 
         try:
-            with http.client(timeout_seconds=timeout, user_agent=self._user_agent) as c:
-                resp = c.request(
-                    method, url,
-                    params=params or None,
-                    headers=headers or None,
-                    json=json_body,
-                    content=text_body,
-                )
+            resp = http.safe_request(
+                method, url,
+                timeout_seconds=timeout, user_agent=self._user_agent,
+                params=params or None,
+                headers=headers or None,
+                json=json_body,
+                content=text_body,
+            )
+        except http.BlockedURLError as exc:
+            raise ToolError(str(exc)) from None
         except httpx.TimeoutException:
             raise ToolError(f"network timeout after {timeout}s") from None
         except httpx.HTTPError as exc:
